@@ -1,0 +1,5 @@
+# Card backups hold real card numbers. Never commit them.
+cards-backup-*.json
+*.json
+!package.json
+.DS_Store

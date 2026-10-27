@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Cards">
+  <title>Cards</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Cards</h1>
+    <div class="top-actions">
+      <button id="menu-btn" class="icon-btn" aria-label="Backup menu">⋯</button>
+      <button id="add-btn" class="primary">+ Add</button>
+    </div>
+  </header>
+
+  <main>
+    <ul id="grid" class="grid"></ul>
+    <div id="empty" class="empty" hidden>
+      <p>No cards yet.</p>
+      <p>Tap <strong>+ Add</strong> and scan a card, a screenshot, or type the number.</p>
+    </div>
+  </main>
+
+  <!-- Full-screen barcode -->
+  <dialog id="show" class="sheet show">
+    <div class="show-head">
+      <button class="icon-btn" data-close aria-label="Close">✕</button>
+      <h2 id="show-name"></h2>
+      <button id="show-edit" class="link-btn">Edit</button>
+    </div>
+    <div id="show-code" class="show-code"></div>
+    <p id="show-number" class="show-number"></p>
+    <p id="show-note" class="show-note"></p>
+  </dialog>
+
+  <!-- Add / edit -->
+  <dialog id="edit" class="sheet">
+    <form id="edit-form" method="dialog">
+      <div class="sheet-head">
+        <button type="button" class="link-btn" data-close>Cancel</button>
+        <h2 id="edit-title">Add card</h2>
+        <button type="submit" class="link-btn strong">Save</button>
+      </div>
+
+      <div class="scan-row">
+        <button type="button" id="scan-camera">Scan with camera</button>
+        <label class="button-like">
+          Scan a photo
+          <input type="file" id="scan-photo" accept="image/*" hidden>
+        </label>
+      </div>
+      <p id="scan-msg" class="msg" role="status"></p>
+
+      <label>Name
+        <input id="f-name" required maxlength="40" placeholder="e.g. New World" autocomplete="off">
+      </label>
+      <label>Card number
+        <input id="f-number" required maxlength="500" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <label>Barcode type
+        <select id="f-format"></select>
+      </label>
+      <label>Colour
+        <input id="f-colour" type="color" value="#0f766e">
+      </label>
+      <label>Note <span class="hint">(optional)</span>
+        <input id="f-note" maxlength="80" placeholder="e.g. Also earns Airpoints">
+      </label>
+
+      <div class="preview-wrap">
+        <div id="preview" class="preview"></div>
+        <p id="preview-msg" class="msg error"></p>
+      </div>
+
+      <div id="edit-extra" class="edit-extra">
+        <div class="order-row">
+          <button type="button" id="move-up">Move earlier</button>
+          <button type="button" id="move-down">Move later</button>
+        </div>
+        <button type="button" id="delete-btn" class="danger">Delete card</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Camera scanner -->
+  <dialog id="scanner" class="sheet scanner">
+    <div class="sheet-head">
+      <button type="button" class="link-btn" data-close>Cancel</button>
+      <h2>Point at the barcode</h2>
+      <span></span>
+    </div>
+    <video id="video" playsinline muted></video>
+    <p class="hint center">Hold steady, fill the frame, and avoid glare.</p>
+  </dialog>
+
+  <!-- Backup menu -->
+  <dialog id="menu" class="sheet menu">
+    <div class="sheet-head">
+      <span></span>
+      <h2>Backup</h2>
+      <button type="button" class="link-btn" data-close>Done</button>
+    </div>
+    <p class="hint">Your cards are saved only on this phone. Export a backup now and then, and keep it in iCloud Drive or Files.</p>
+    <button type="button" id="export-btn">Export backup</button>
+    <label class="button-like">
+      Import backup
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+    </label>
+    <p id="menu-msg" class="msg" role="status"></p>
+    <p class="hint small" id="version"></p>
+  </dialog>
+
+  <script src="vendor/bwip-js-min.js"></script>
+  <script src="vendor/zxing.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
