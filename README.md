@@ -8,6 +8,9 @@ A small, ad-free web app that keeps loyalty and savings card barcodes in one pla
 
 Card numbers are stored only in the browser on the phone (local storage). Nothing is sent anywhere. This repo holds the app code only, never card data. Backup files are git-ignored.
 
+- **Backups are plain text.** An exported backup contains every card number unencrypted. Wherever it is saved gets a copy.
+- **Shared hostname.** Every GitHub Pages project site under this account is served from `hfnickyboynz.github.io`, and browser storage is shared per hostname, not per repo. Any other Pages site published from this account could read the cards. Before publishing another Pages site here, move this app to its own domain or accept that risk.
+
 ## Install on iPhone
 
 1. Open the live app link in **Safari**.
