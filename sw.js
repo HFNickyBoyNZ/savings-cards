@@ -1,5 +1,5 @@
 // Bump CACHE when any file changes so phones pick up the new version.
-const CACHE = 'cards-v1.0.0';
+const CACHE = 'cards-v1.1.0';
 const ASSETS = [
   './',
   'index.html',

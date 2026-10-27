@@ -1,6 +1,8 @@
 'use strict';
 
-const APP_VERSION = '1.0.0';
+// Keep in step with CACHE in sw.js: the app checks that cache exists.
+const APP_VERSION = '1.1.0';
+const CACHE_NAME = 'cards-v' + APP_VERSION;
 const STORE_KEY = 'cards.v1';
 
 // bwip-js symbology id -> label, plus the ZXing format name that maps to it.
@@ -20,6 +22,9 @@ const FORMATS = [
 
 const $ = (sel) => document.querySelector(sel);
 
+// If stored data can't be read, keep a copy and block saving so a later
+// write never overwrites cards that might still be recoverable.
+let storageBroken = false;
 let cards = load();
 let editingId = null;
 let wakeLock = null;
@@ -27,22 +32,34 @@ let wakeLock = null;
 // ---------- Storage ----------
 
 function load() {
+  let raw = null;
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.filter(isValidCard) : [];
+    raw = localStorage.getItem(STORE_KEY);
+    const parsed = JSON.parse(raw || '[]');
+    if (!Array.isArray(parsed)) throw new Error('not a list');
+    return parsed.filter(isValidCard);
   } catch {
+    storageBroken = true;
+    try { if (raw) localStorage.setItem(STORE_KEY + '.unreadable.' + Date.now(), raw); } catch { /* best effort */ }
     return [];
   }
 }
 
-function save() {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(cards));
-    return true;
-  } catch {
-    alert('Could not save. Storage may be full or blocked.');
+// Saves `next` and only then makes it the live list. Returns false on failure.
+function commit(next) {
+  if (storageBroken) {
+    alert('Saved cards could not be read, so saving is switched off to protect them. Import a backup to recover.');
     return false;
   }
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(next));
+  } catch {
+    alert('Could not save. Storage may be full or blocked. Nothing was changed.');
+    return false;
+  }
+  cards = next;
+  renderGrid();
+  return true;
 }
 
 function isValidCard(c) {
@@ -182,24 +199,19 @@ $('#edit-form').addEventListener('submit', (ev) => {
     note: $('#f-note').value.trim(),
   };
   if (!data.name || !data.number) return;
-  if (editingId) {
-    Object.assign(cards.find((c) => c.id === editingId), data);
-  } else {
-    cards.push({ id: newId(), ...data });
-  }
-  if (save()) {
-    renderGrid();
-    closeDialog('#edit');
-  }
+  const next = editingId
+    ? cards.map((c) => (c.id === editingId ? { ...c, ...data } : c))
+    : [...cards, { id: newId(), ...data }];
+  if (commit(next)) closeDialog('#edit');
 });
 
 function move(delta) {
   const i = cards.findIndex((c) => c.id === editingId);
   const j = i + delta;
   if (i < 0 || j < 0 || j >= cards.length) return;
-  [cards[i], cards[j]] = [cards[j], cards[i]];
-  save();
-  renderGrid();
+  const next = [...cards];
+  [next[i], next[j]] = [next[j], next[i]];
+  commit(next);
 }
 
 $('#move-up').addEventListener('click', () => move(-1));
@@ -208,10 +220,7 @@ $('#move-down').addEventListener('click', () => move(1));
 $('#delete-btn').addEventListener('click', () => {
   const card = cards.find((c) => c.id === editingId);
   if (!card || !confirm(`Delete ${card.name}? This cannot be undone unless you have a backup.`)) return;
-  cards = cards.filter((c) => c.id !== editingId);
-  save();
-  renderGrid();
-  closeDialog('#edit');
+  if (commit(cards.filter((c) => c.id !== editingId))) closeDialog('#edit');
 });
 
 // ---------- Scanning ----------
@@ -233,30 +242,42 @@ function applyScan(result) {
   updatePreview();
 }
 
-let scanReader = null;
+// One scan session at a time. We own the camera stream rather than leaving
+// it to ZXing, so Cancel always turns the camera off, even if it is pressed
+// while the permission prompt is still open.
+let scan = null;
+
+function stopScan() {
+  if (!scan) return;
+  scan.reader.reset();
+  if (scan.stream) scan.stream.getTracks().forEach((t) => t.stop());
+  scan = null;
+}
 
 $('#scan-camera').addEventListener('click', async () => {
+  stopScan();
   $('#scan-msg').textContent = '';
-  scanReader = makeReader();
+  const session = { reader: makeReader(), stream: null };
+  scan = session;
   $('#scanner').showModal();
   try {
-    await scanReader.decodeFromConstraints(
-      { video: { facingMode: 'environment' } },
-      $('#video'),
-      (result) => {
-        if (!result) return;
-        applyScan(result);
-        closeDialog('#scanner');
-      });
-  } catch (e) {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    if (scan !== session) { stream.getTracks().forEach((t) => t.stop()); return; }
+    session.stream = stream;
+    await session.reader.decodeFromStream(stream, $('#video'), (result) => {
+      if (!result || scan !== session) return;
+      applyScan(result);
+      closeDialog('#scanner');
+    });
+    if (scan !== session) stream.getTracks().forEach((t) => t.stop());
+  } catch {
+    if (scan !== session) return;
     closeDialog('#scanner');
     $('#scan-msg').textContent = 'Camera not available. Allow camera access, or scan a photo instead.';
   }
 });
 
-$('#scanner').addEventListener('close', () => {
-  if (scanReader) { scanReader.reset(); scanReader = null; }
-});
+$('#scanner').addEventListener('close', stopScan);
 
 $('#scan-photo').addEventListener('change', async (ev) => {
   const file = ev.target.files[0];
@@ -275,8 +296,31 @@ $('#scan-photo').addEventListener('change', async (ev) => {
 
 // ---------- Backup ----------
 
+const LAST_EXPORT_KEY = 'cards.lastExport';
+const health = { offline: 'Checking…', storage: 'Checking…' };
+
+function lastExport() {
+  try { return localStorage.getItem(LAST_EXPORT_KEY); } catch { return null; }
+}
+
+function renderHealth() {
+  const last = lastExport();
+  $('#health').replaceChildren(...[
+    ['Offline', health.offline],
+    ['Storage', health.storage],
+    ['Last backup', last ? new Date(last).toLocaleDateString('en-NZ') : 'Never'],
+  ].map(([k, v]) => {
+    const li = document.createElement('li');
+    const b = document.createElement('strong');
+    b.textContent = k + ': ';
+    li.append(b, v);
+    return li;
+  }));
+}
+
 $('#menu-btn').addEventListener('click', () => {
   $('#menu-msg').textContent = '';
+  renderHealth();
   $('#menu').showModal();
 });
 
@@ -294,6 +338,8 @@ $('#export-btn').addEventListener('click', async () => {
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
+    try { localStorage.setItem(LAST_EXPORT_KEY, new Date().toISOString()); } catch { /* not critical */ }
+    renderHealth();
     $('#menu-msg').textContent = `Exported ${cards.length} card(s).`;
   } catch (e) {
     if (e.name !== 'AbortError') $('#menu-msg').textContent = 'Export failed.';
@@ -309,13 +355,16 @@ $('#import-file').addEventListener('change', async (ev) => {
     const incoming = (Array.isArray(parsed) ? parsed : parsed.cards || []).filter(isValidCard);
     if (!incoming.length) throw new Error('none');
     // Merge: cards with the same id are replaced, new ones are added.
+    const next = [...cards];
     for (const card of incoming) {
-      const i = cards.findIndex((c) => c.id === card.id);
-      if (i >= 0) cards[i] = card; else cards.push(card);
+      const i = next.findIndex((c) => c.id === card.id);
+      if (i >= 0) next[i] = card; else next.push(card);
     }
-    save();
-    renderGrid();
-    $('#menu-msg').textContent = `Imported ${incoming.length} card(s).`;
+    // Importing a backup is the recovery path, so it re-enables saving.
+    storageBroken = false;
+    $('#menu-msg').textContent = commit(next)
+      ? `Imported ${incoming.length} card(s).`
+      : 'Import failed: could not save. Nothing was changed.';
   } catch {
     $('#menu-msg').textContent = 'That file is not a valid Cards backup.';
   }
@@ -339,8 +388,33 @@ renderGrid();
 $('#add-btn').addEventListener('click', () => openEdit(null));
 $('#version').textContent = `Version ${APP_VERSION}`;
 
-if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+if (storageBroken) {
+  alert('Your saved cards could not be read. Saving is switched off to protect them. Open ⋯ and import a backup.');
+}
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+(async () => {
+  try {
+    const granted = navigator.storage && navigator.storage.persist && await navigator.storage.persist();
+    health.storage = granted
+      ? 'Kept permanently'
+      : 'Best effort: iOS may clear it if space runs low. Keep a backup.';
+  } catch {
+    health.storage = 'Unknown. Keep a backup.';
+  }
+})();
+
+if (!('serviceWorker' in navigator) || location.protocol !== 'https:') {
+  health.offline = 'Not available here (needs the installed app over HTTPS).';
+} else {
+  // A new version took over: reload once so page and cache match.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !reloaded) { reloaded = true; location.reload(); }
+  });
+  navigator.serviceWorker.register('sw.js')
+    .then(() => navigator.serviceWorker.ready)
+    .then(() => caches.has(CACHE_NAME))
+    .then((ok) => { health.offline = ok ? `Ready (version ${APP_VERSION})` : 'Not ready: files not cached yet. Open once with signal.'; })
+    .catch(() => { health.offline = 'Not ready: offline setup failed. Open once with signal.'; });
 }

@@ -268,3 +268,15 @@ dialog.show .link-btn { color: #0f766e; }
 }
 
 .menu > button, .menu > .button-like { width: 100%; margin-top: 12px; }
+
+.health {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 15px;
+  display: grid;
+  gap: 6px;
+}
